@@ -89,6 +89,9 @@ LAYOUT_PLOTLY = dict(
 
 
 # ── CARREGAR DADOS ────────────────────────────────────────────────────────────
+GITHUB_REPO = "gustavoaguiaram-design/chroma-dashboard"
+GITHUB_BRANCH = "main"
+
 @st.cache_data(ttl=300)
 def carregar_dados(caminho):
     try:
@@ -102,8 +105,35 @@ def carregar_dados(caminho):
         return None, None
 
 
+@st.cache_data(ttl=300)
+def carregar_dados_github():
+    """Carrega o Excel mais recente do repositório GitHub."""
+    import requests, io
+    try:
+        # Lista arquivos do repositório
+        api = f"https://api.github.com/repos/{GITHUB_REPO}/contents/"
+        r = requests.get(api)
+        if r.status_code != 200:
+            return None, None
+        arquivos = [f["name"] for f in r.json()
+                    if f["name"].startswith("chroma_relatorio_completo") and f["name"].endswith(".xlsx")]
+        if not arquivos:
+            return None, None
+        arquivo = sorted(arquivos)[-1]
+        # Baixa o arquivo
+        url_raw = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/{arquivo}"
+        r2 = requests.get(url_raw)
+        if r2.status_code != 200:
+            return None, None
+        xls = pd.ExcelFile(io.BytesIO(r2.content))
+        dados = {aba: pd.read_excel(io.BytesIO(r2.content), sheet_name=aba) for aba in xls.sheet_names}
+        return dados, arquivo
+    except Exception as e:
+        return None, None
+
+
 def encontrar_excel():
-    """Procura o Excel mais recente na pasta de relatórios."""
+    """Procura o Excel mais recente na pasta de relatórios (uso local)."""
     pasta = r"C:\Users\gustavo\Downloads\Chroma_Relatorios"
     if not os.path.exists(pasta):
         return None
@@ -136,10 +166,10 @@ with st.sidebar:
 
     if caminho and os.path.exists(caminho):
         ts = datetime.fromtimestamp(os.path.getmtime(caminho))
-        st.success(f"✓ Arquivo encontrado")
+        st.success(f"✓ Arquivo local encontrado")
         st.caption(f"Atualizado: {ts.strftime('%d/%m/%Y %H:%M')}")
     elif not caminho:
-        st.info("Nenhum arquivo encontrado. Cole o caminho acima.")
+        st.info("Carregando do GitHub...")
 
     st.markdown("---")
     st.markdown("### 🔄 Atualização")
@@ -164,19 +194,26 @@ st.markdown("""
 
 # ── CONTEÚDO PRINCIPAL ────────────────────────────────────────────────────────
 if not caminho or not os.path.exists(caminho):
-    st.markdown("""
-    <div style='text-align:center; padding:4rem; border:1px dashed #00E5E520; border-radius:12px;'>
-        <div style='font-size:3rem;'>📊</div>
-        <div style='font-family:Rajdhani; font-size:1.5rem; color:#00E5E5; margin:1rem 0;'>NENHUM ARQUIVO CARREGADO</div>
-        <div style='color:#888;'>Execute o script <code>chroma_exportar.py</code> para gerar o Excel<br>ou informe o caminho do arquivo na barra lateral.</div>
-    </div>
-    """, unsafe_allow_html=True)
-    st.stop()
-
-dados, _ = carregar_dados(caminho)
+    # Tenta carregar do GitHub
+    dados, nome_arquivo = carregar_dados_github()
+    if dados:
+        with st.sidebar:
+            st.success("✓ Dados carregados do GitHub")
+            st.caption(f"Arquivo: {nome_arquivo}")
+    else:
+        st.markdown("""
+        <div style='text-align:center; padding:4rem; border:1px dashed #00E5E520; border-radius:12px;'>
+            <div style='font-size:3rem;'>📊</div>
+            <div style='font-family:Rajdhani; font-size:1.5rem; color:#00E5E5; margin:1rem 0;'>NENHUM ARQUIVO CARREGADO</div>
+            <div style='color:#888;'>Execute o script <code>chroma_exportar.py</code> para gerar o Excel<br>ou informe o caminho do arquivo na barra lateral.</div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.stop()
+else:
+    dados, _ = carregar_dados(caminho)
 
 if not dados:
-    st.error("Erro ao carregar o arquivo. Verifique se é um Excel válido.")
+    st.error("Erro ao carregar o arquivo.")
     st.stop()
 
 abas = list(dados.keys())
